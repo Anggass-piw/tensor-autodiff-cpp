@@ -32,7 +32,7 @@ void require_same_shape(const Tensor& lhs, const Tensor& rhs, const char* operat
 void accumulate(Tensor& destination, const Tensor& contribution) {
     require_same_shape(destination, contribution, "gradient accumulation");
     for (std::size_t i = 0; i < destination.size(); ++i) {
-        destination.values()[i] += contribution.values()[i];
+        destination.flat_at(i) += contribution.values()[i];
     }
 }
 
@@ -70,6 +70,16 @@ double Tensor::item() const {
     return values_[0];
 }
 
+double& Tensor::flat_at(std::size_t index) {
+    if (index >= size()) throw std::out_of_range("flat tensor index is out of range");
+    return values_[index];
+}
+
+const double& Tensor::flat_at(std::size_t index) const {
+    if (index >= size()) throw std::out_of_range("flat tensor index is out of range");
+    return values_[index];
+}
+
 double Tensor::at2d(std::size_t row, std::size_t col) const {
     if (shape_.size() != 2 || row >= shape_[0] || col >= shape_[1]) {
         throw std::out_of_range("2-D tensor index is out of range");
@@ -101,18 +111,18 @@ Value Value::constant(Tensor data) {
 
 const Tensor& Value::data() const noexcept { return node_->data; }
 
-Tensor& Value::mutable_data() {
+double& Value::mutable_data(std::size_t flat_index) {
     if (!node_->is_leaf) {
         throw std::logic_error("only leaf values may be changed in place");
     }
-    return node_->data;
+    return node_->data.flat_at(flat_index);
 }
 
 const Tensor& Value::grad() const noexcept { return node_->grad; }
 bool Value::requires_grad() const noexcept { return node_->requires_grad; }
 
 void Value::zero_grad() {
-    std::fill(node_->grad.values().begin(), node_->grad.values().end(), 0.0);
+    for (std::size_t i = 0; i < node_->grad.size(); ++i) node_->grad.flat_at(i) = 0.0;
 }
 
 void Value::backward() {
@@ -139,10 +149,11 @@ void Value::backward() {
     // Keep leaf gradients cumulative, but reset transient graph-node gradients so a
     // second backward() propagates only the newly seeded output gradient.
     for (const auto& current : topological) {
-        if (!current->is_leaf)
-            std::fill(current->grad.values().begin(), current->grad.values().end(), 0.0);
+        if (!current->is_leaf) {
+            for (std::size_t i = 0; i < current->grad.size(); ++i) current->grad.flat_at(i) = 0.0;
+        }
     }
-    node_->grad.values()[0] += 1.0;
+    node_->grad.flat_at(0) += 1.0;
     for (auto it = topological.rbegin(); it != topological.rend(); ++it) {
         if ((*it)->backward_fn) (*it)->backward_fn();
     }
@@ -152,7 +163,7 @@ Value operator+(const Value& lhs, const Value& rhs) {
     require_same_shape(lhs.data(), rhs.data(), "addition");
     Tensor output(lhs.data().shape(), 0.0);
     for (std::size_t i = 0; i < output.size(); ++i) {
-        output.values()[i] = lhs.data().values()[i] + rhs.data().values()[i];
+        output.flat_at(i) = lhs.data().values()[i] + rhs.data().values()[i];
     }
     auto a = lhs.node_;
     auto b = rhs.node_;
@@ -170,7 +181,7 @@ Value operator*(const Value& lhs, const Value& rhs) {
     require_same_shape(lhs.data(), rhs.data(), "elementwise multiplication");
     Tensor output(lhs.data().shape(), 0.0);
     for (std::size_t i = 0; i < output.size(); ++i) {
-        output.values()[i] = lhs.data().values()[i] * rhs.data().values()[i];
+        output.flat_at(i) = lhs.data().values()[i] * rhs.data().values()[i];
     }
     auto a = lhs.node_;
     auto b = rhs.node_;
@@ -180,13 +191,13 @@ Value operator*(const Value& lhs, const Value& rhs) {
         if (a->requires_grad) {
             Tensor contribution(a->data.shape(), 0.0);
             for (std::size_t i = 0; i < contribution.size(); ++i)
-                contribution.values()[i] = out->grad.values()[i] * b->data.values()[i];
+                contribution.flat_at(i) = out->grad.values()[i] * b->data.values()[i];
             accumulate(a->grad, contribution);
         }
         if (b->requires_grad) {
             Tensor contribution(b->data.shape(), 0.0);
             for (std::size_t i = 0; i < contribution.size(); ++i)
-                contribution.values()[i] = out->grad.values()[i] * a->data.values()[i];
+                contribution.flat_at(i) = out->grad.values()[i] * a->data.values()[i];
             accumulate(b->grad, contribution);
         }
     };
@@ -195,7 +206,7 @@ Value operator*(const Value& lhs, const Value& rhs) {
 
 Value operator+(const Value& lhs, double rhs) {
     Tensor output = lhs.data();
-    for (auto& value : output.values()) value += rhs;
+    for (std::size_t i = 0; i < output.size(); ++i) output.flat_at(i) += rhs;
     auto parent = lhs.node_;
     auto node = make_node(std::move(output), parent->requires_grad, {parent}, {});
     Node* out = node.get();
@@ -209,14 +220,14 @@ Value operator+(double lhs, const Value& rhs) { return rhs + lhs; }
 
 Value operator*(const Value& lhs, double rhs) {
     Tensor output = lhs.data();
-    for (auto& value : output.values()) value *= rhs;
+    for (std::size_t i = 0; i < output.size(); ++i) output.flat_at(i) *= rhs;
     auto parent = lhs.node_;
     auto node = make_node(std::move(output), parent->requires_grad, {parent}, {});
     Node* out = node.get();
     node->backward_fn = [parent, out, rhs]() {
         if (!parent->requires_grad) return;
         Tensor contribution = out->grad;
-        for (auto& value : contribution.values()) value *= rhs;
+        for (std::size_t i = 0; i < contribution.size(); ++i) contribution.flat_at(i) *= rhs;
         accumulate(parent->grad, contribution);
     };
     return Value(std::move(node));
@@ -240,7 +251,10 @@ Value Value::sum() const {
 
 Value Value::relu() const {
     Tensor output = node_->data;
-    for (auto& value : output.values()) value = value > 0.0 ? value : 0.0;
+    for (std::size_t i = 0; i < output.size(); ++i) {
+        const double value = output.values()[i];
+        output.flat_at(i) = value > 0.0 ? value : 0.0;
+    }
     auto parent = node_;
     auto node = make_node(std::move(output), parent->requires_grad, {parent}, {});
     Node* out = node.get();
@@ -248,7 +262,7 @@ Value Value::relu() const {
         if (!parent->requires_grad) return;
         Tensor contribution(parent->data.shape(), 0.0);
         for (std::size_t i = 0; i < contribution.size(); ++i)
-            contribution.values()[i] = parent->data.values()[i] > 0.0 ? out->grad.values()[i] : 0.0;
+            contribution.flat_at(i) = parent->data.values()[i] > 0.0 ? out->grad.values()[i] : 0.0;
         accumulate(parent->grad, contribution);
     };
     return Value(std::move(node));

@@ -17,9 +17,10 @@ public:
 
     const std::vector<std::size_t>& shape() const noexcept { return shape_; }
     const std::vector<double>& values() const noexcept { return values_; }
-    std::vector<double>& values() noexcept { return values_; }
     std::size_t size() const noexcept { return values_.size(); }
     double item() const;
+    double& flat_at(std::size_t index);
+    const double& flat_at(std::size_t index) const;
     double at2d(std::size_t row, std::size_t col) const;
     double& at2d(std::size_t row, std::size_t col);
     Tensor zeros_like() const;
@@ -47,8 +48,8 @@ public:
     static Value constant(Tensor data);
 
     const Tensor& data() const noexcept;
-    // Mutable access is intended for optimizer updates on leaf variables only.
-    Tensor& mutable_data();
+    // Mutable element access is intended for optimizer updates on leaf values only.
+    double& mutable_data(std::size_t flat_index);
     const Tensor& grad() const noexcept;
     bool requires_grad() const noexcept;
     void zero_grad();

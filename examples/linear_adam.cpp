@@ -41,9 +41,9 @@ int main() {
 
         const double correction1 = 1.0 - std::pow(beta1, step);
         const double correction2 = 1.0 - std::pow(beta2, step);
-        weight.mutable_data().values()[0] -= learning_rate * (first_moment_w / correction1) /
+        weight.mutable_data(0) -= learning_rate * (first_moment_w / correction1) /
             (std::sqrt(second_moment_w / correction2) + epsilon);
-        bias.mutable_data().values()[0] -= learning_rate * (first_moment_b / correction1) /
+        bias.mutable_data(0) -= learning_rate * (first_moment_b / correction1) /
             (std::sqrt(second_moment_b / correction2) + epsilon);
     }
 
