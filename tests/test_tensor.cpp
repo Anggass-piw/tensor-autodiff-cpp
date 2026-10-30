@@ -5,10 +5,15 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
 int failures = 0;
+static_assert(std::is_same_v<decltype(std::declval<tinyad::Tensor&>().values()),
+                             const std::vector<double>&>,
+              "Tensor::values() must not expose resizable mutable storage");
 
 void check(bool condition, const std::string& message) {
     if (!condition) {
@@ -39,6 +44,24 @@ void test_validation() {
     tinyad::Tensor scalar = tinyad::Tensor::scalar(2.5);
     near(scalar.item(), 2.5, "scalar item");
     throws<std::logic_error>([] { tinyad::Tensor({2}, {1.0, 2.0}).item(); }, "item requires one element");
+
+    tinyad::Tensor indexed({2}, {1.0, 2.0});
+    indexed.flat_at(1) = 4.0;
+    near(indexed.values()[1], 4.0, "flat_at mutates an element without changing storage size");
+    throws<std::out_of_range>([&] { (void)indexed.flat_at(indexed.size()); },
+                              "reject flat index past tensor storage");
+}
+
+void test_leaf_element_updates() {
+    auto leaf = tinyad::Value::variable(tinyad::Tensor({2}, {1.0, 2.0}));
+    leaf.mutable_data(1) = 3.0;
+    near(leaf.data().values()[1], 3.0, "update one leaf element for an optimizer step");
+    throws<std::out_of_range>([&] { (void)leaf.mutable_data(leaf.data().size()); },
+                              "reject leaf update past tensor storage");
+
+    auto result = leaf.sum();
+    throws<std::logic_error>([&] { (void)result.mutable_data(0); },
+                             "reject in-place element updates on non-leaf values");
 }
 
 void test_elementwise_and_shared_graph() {
@@ -100,6 +123,7 @@ void test_matmul() {
 
 int main() {
     test_validation();
+    test_leaf_element_updates();
     test_elementwise_and_shared_graph();
     test_scalar_ops_relu_and_shapes();
     test_matmul();
