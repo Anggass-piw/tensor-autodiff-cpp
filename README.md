@@ -37,7 +37,7 @@ loss.backward();
 // x.grad() is [4, 5]
 ```
 
-The available differentiable operations are exact-shape addition, exact-shape elementwise multiplication, scalar addition and multiplication, full sum reduction, ReLU, and 2-D matrix multiplication. `backward()` seeds a one-element output with gradient 1; reduce a multi-element output with `sum()` first. Gradients accumulate, so call `zero_grad()` on leaf variables before a new optimization step. Optimizers can update leaf data through `mutable_data()`.
+The available differentiable operations are exact-shape addition, exact-shape elementwise multiplication, scalar addition and multiplication, full sum reduction, ReLU, and 2-D matrix multiplication. `backward()` seeds a one-element output with gradient 1; reduce a multi-element output with `sum()` first. Gradients accumulate, so call `zero_grad()` on leaf variables before a new optimization step. Optimizers can update individual leaf elements through `mutable_data(flat_index)`. `Tensor::values()` is read-only; use the bounds-checked `flat_at(index)` or `at2d(row, col)` to update individual tensor elements without changing the storage size or shape.
 
 ## Current MVP boundaries
 
